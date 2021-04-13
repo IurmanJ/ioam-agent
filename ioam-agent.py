@@ -3,14 +3,14 @@ import os
 import os.path
 import getopt
 import socket
-#import grpc
+import grpc
 import ioam_trace_pb2
-#import ioam_trace_pb2_grpc
+import ioam_trace_pb2_grpc
 from bitstruct import unpack
 
 ETH_P_IPV6 = 0x86DD
 
-IPV6_TLV_IOAM = 32
+IPV6_TLV_IOAM = 49
 IOAM_PREALLOC_TRACE = 0
 
 TRACE_BIT0  = 1 << 31	# Hop_Lim + Node Id (short)
@@ -41,7 +41,7 @@ BITFIELD_BIT10 = 1 << 21 # Opaque State Snapshot
 
 
 def help():
-	print("Syntax: "+ os.path.basename(__file__) +" -i <interface>")
+	print("Syntax: "+ os.path.basename(__file__) +" -i <interface> [-o]")
 
 def help_str(err):
 	print(err)
@@ -51,18 +51,16 @@ def interface_exists(interface):
 	try:
 		socket.if_nametoindex(interface)
 		return True
-
 	except OSError:
 		return False
 
 def report_ioam(stub, traces):
-	#try:
+	try:
 		for trace in traces:
-				#stub.Report(trace)
-				print(trace)
-	#except grpc.RpcError as e:
+			print(trace) if stub is None else stub.Report(trace)
+	except grpc.RpcError as e:
 		# IOAM collector is probably not online
-	#	pass
+		pass
 
 def type2bitfield(trace_type):
 	bitfield = 0
@@ -192,6 +190,9 @@ def parse(packet):
 
 def listen(interface, collector):
 	try:
+		sock = None
+		stub = None
+
 		sock = socket.socket(socket.AF_PACKET,
 				     socket.SOCK_DGRAM,
 				     socket.htons(ETH_P_IPV6))
@@ -200,53 +201,59 @@ def listen(interface, collector):
 				socket.SO_BINDTODEVICE,
 				interface.encode())
 
-		#channel = grpc.insecure_channel(collector)
-		#stub = ioam_trace_pb2_grpc.IOAMServiceStub(channel)
+		if collector is None:
+			print("[IOAM Agent] Printing IOAM traces...")
+		else:
+			channel = grpc.insecure_channel(collector)
+			stub = ioam_trace_pb2_grpc.IOAMServiceStub(channel)
+			print("[IOAM Agent] Reporting to IOAM collector...")
 
-		#print("[IOAM Agent] Reporting to IOAM collector...")
 		while True:
 			traces = parse(sock.recv(65565))
-
 			if traces is not None:
-				#report_ioam(stub, traces)
-				report_ioam(None, traces)
-
+				report_ioam(stub, traces)
 	except KeyboardInterrupt:
 		print("[IOAM Agent] Closing...")
 	except Exception as e:
 		print("[IOAM Agent] Closing on unexpected error: "+ str(e))
 	finally:
-		#channel.close()
-		sock.close()
+		if stub is not None:
+			channel.close()
+		if sock is not None:
+			sock.close()
 
 def main(script, argv):
 	try:
-		opts, args = getopt.getopt(argv, "hi:", ["interface="])
-
+		opts, args = getopt.getopt(argv, "hi:o", ["help", "interface=", "output"])
 	except getopt.GetoptError:
 		help()
 		sys.exit(1)
 
 	interface = ""
+	output = False
+
 	for opt, arg in opts:
-		if opt == '-h':
+		if opt in ("-h", "--help"):
 			help()
 			sys.exit()
 
 		if opt in ("-i", "--interface"):
 			interface = arg
 
+		if opt in ("-o", "--output"):
+			output = True
+
 	if not interface_exists(interface):
 		help_str("Unknown interface "+ interface)
 		sys.exit(1)
 
 	try:
-		#collector = os.environ['IOAM_COLLECTOR']
-		#listen(interface, collector)
-		listen(interface, None)
+		collector = os.environ['IOAM_COLLECTOR'] if not output else None
+		listen(interface, collector)
 	except KeyError:
 		print("IOAM collector is not defined")
 		sys.exit(1)
 
 if __name__ == "__main__":
 	main(sys.argv[0], sys.argv[1:])
+
