@@ -1,5 +1,7 @@
 # IOAM Agent for Python3
 
+Note: specific ioam-agent for [CLT](https://github.com/IurmanJ/cross-layer-telemetry).
+
 1) Install dependencies:
 ```
 pip3 install bitstruct grpcio grpcio-tools

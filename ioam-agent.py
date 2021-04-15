@@ -57,7 +57,12 @@ def interface_exists(interface):
 def report_ioam(stub, traces):
 	try:
 		for trace in traces:
-			print(trace) if stub is None else stub.Report(trace)
+			if stub is not None:
+				if ((trace.TraceId_High != 0 or trace.TraceId_Low != 0)
+				    and trace.SpanId != 0):
+					stub.Report(trace)
+			else:
+				print(trace)
 	except grpc.RpcError as e:
 		# IOAM collector is probably not online
 		pass
@@ -130,11 +135,11 @@ def parse_node_data(data, trace_type):
 
 def parse_ioam_trace(data):
 	try:
-		nsId, node_len, _, remaining_len, \
-			trace_type = unpack(">u16u5u4u7u32", data[:8])
+		nsId, node_len, _, remaining_len, trace_type, \
+		  trace_id, span_id = unpack(">u16u5u4u7u32u128u64", data[:32])
 
 		nodes = []
-		i = 8 + remaining_len * 4
+		i = 32 + remaining_len * 4
 
 		while i < len(data):
 			node = parse_node_data(data[i:i+node_len*4], trace_type)
@@ -153,6 +158,9 @@ def parse_ioam_trace(data):
 		trace = ioam_trace_pb2.IOAMTrace()
 		trace.BitField = type2bitfield(trace_type)
 		trace.NamespaceId = nsId
+		trace.TraceId_High = trace_id >> 64
+		trace.TraceId_Low = trace_id & 0x0000000000000000ffffffffffffffff
+		trace.SpanId = span_id
 		trace.Nodes.extend(nodes)
 
 		return trace
